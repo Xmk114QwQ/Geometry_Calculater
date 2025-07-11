@@ -6,6 +6,7 @@ from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from mpl_toolkits.mplot3d import proj3d
+import logging
 import numpy as np
 import time
 
@@ -366,614 +367,481 @@ class GeometryGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("智能几何分析器（含向量计算与可视化）")
-        self.root.geometry("1200x800")
-        self.root.configure(bg="#FFFFFF")  # 纯白色背景
-        # 初始化选中的点列表
-        self.selected_points = []  # 存储用户选择的点
-        
-        # 配置更现代的主题（白色版）
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure(".", background="#FFFFFF")
-        style.configure("TFrame", background="#FFFFFF")
-        style.configure("TButton", background="#4a86e8", foreground="white")
-        style.map("TButton", background=[('active', '#3a76d8')])
-        style.configure("TLabel", background="#FFFFFF", foreground="black")
-        style.configure("TLabelframe", background="#FFFFFF")
-        style.configure("TLabelframe.Label", background="#FFFFFF", foreground="black")
-        style.configure("TNotebook", background="#FFFFFF")
-        style.configure("TNotebook.Tab", background="#f0f0f0", padding=[10, 5], foreground="black")
-        style.map("TNotebook.Tab", background=[("selected", "#FFFFFF")])
-        style.configure("TCombobox", fieldbackground="white")
-        style.configure("Vertical.TScrollbar", background="#e0e0e0")
-        
+        self.root.geometry("1300x900")
+        self.root.configure(bg="#F5F6F7")  # 浅灰白背景
+
+        # ========== 初始化所有需要用到的属性 ========== #
+        # 交互模式状态
+        self.interaction_mode = False
+        # 存储选中的点名列表
+        self.selected_points = []
+        # 线段颜色和线型
+        self.segment_color = "black"
+        self.linestyle_var = tk.StringVar(value='solid')
+        # 点输入变量
+        self.point_name = tk.StringVar()
+        self.point_x = tk.StringVar()
+        self.point_y = tk.StringVar()
+        self.point_z = tk.StringVar(value="0")
+        # 起点/终点下拉框绑定变量
+        self.start_point = tk.StringVar()
+        self.end_point = tk.StringVar()
+        # 向量相关变量
+        self.vec1_start = tk.StringVar()
+        self.vec1_end = tk.StringVar()
+        self.vec2_start = tk.StringVar()
+        self.vec2_end = tk.StringVar()
+        self.vec1_input = tk.StringVar(value="0,0,0")
+        self.vec2_input = tk.StringVar(value="0,0,0")
+        self.calc_type = tk.StringVar(value="点积")
+        # 删除操作相关
+        self.delete_type = tk.StringVar(value='点')
+        self.delete_object = tk.StringVar()
         # 初始化分析器
         self.analyzer = GeometryAnalyzer()
-        
+        # 配置现代主题
+        self._configure_modern_style()
         # 创建主框架
-        self.main_frame = ttk.Frame(self.root, padding=10)
+        self.main_frame = ttk.Frame(self.root, padding=15)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
-        
         # ==================== 顶部工具栏 ====================
         top_toolbar = ttk.Frame(self.main_frame)
-        top_toolbar.pack(side=tk.TOP, fill=tk.X, pady=(0, 5))
-
-        # 使用 Grid 布局来控制按钮分布
-        for i in range(4):  # 四列
+        top_toolbar.pack(side=tk.TOP, fill=tk.X, pady=(0, 8))
+        for i in range(5):
             top_toolbar.grid_columnconfigure(i, weight=1)
-
-        # 添加按钮
-        ttk.Button(top_toolbar, text="切换视图", command=self.toggle_3d_view).grid(
+        ttk.Button(top_toolbar, text="切换视图", command=self.toggle_3d_view, style="TButton").grid(
             row=0, column=0, sticky="ew", padx=2)
-
-        ttk.Button(top_toolbar, text="加载示例", command=self._add_sample_data).grid(
+        ttk.Button(top_toolbar, text="加载示例", command=self._add_sample_data, style="TButton").grid(
             row=0, column=1, sticky="ew", padx=2)
-
-        ttk.Button(top_toolbar, text="刷新页面", command=self.refresh_page).grid(
+        ttk.Button(top_toolbar, text="刷新页面", command=self.refresh_page, style="TButton").grid(
             row=0, column=2, sticky="ew", padx=2)
-
-        ttk.Button(top_toolbar, text="交互模式", command=self.toggle_interaction_mode).grid(
+        ttk.Button(top_toolbar, text="交互模式", command=self.toggle_interaction_mode, style="TButton").grid(
             row=0, column=3, sticky="ew", padx=2)
-
-        # 创建主分割窗口 (PanedWindow) - 可拖动的分隔条
+        ttk.Button(top_toolbar, text="清除数据", command=self.clear_all_data, style="TButton").grid(
+            row=0, column=4, sticky="ew", padx=2)
+        # 创建主分割窗口
         self.paned_window = ttk.PanedWindow(self.main_frame, orient=tk.HORIZONTAL)
         self.paned_window.pack(fill=tk.BOTH, expand=True)
-        
-        # 左侧控制面板框架 (可调整大小)
-        self.control_container = tk.Frame(self.paned_window)
-        self.paned_window.add(self.control_container, weight=1)  # 初始权重设为1 (约占总宽的25%)
-        
-        # 设置分割条样式
-        style.configure("Sash", background="#d0d0d0", gripcount=5)
-        
+        # 左侧控制面板框架
+        self.control_container = ttk.Frame(self.paned_window, padding=8)
+        self.paned_window.add(self.control_container, weight=1)  # 初始权重设为1
         # 右侧绘图区域框架
-        self.plot_container = ttk.Frame(self.paned_window)
-        self.paned_window.add(self.plot_container, weight=3)  # 初始权重设为3 (约占总宽的75%)
-        
+        self.plot_container = ttk.Frame(self.paned_window, padding=8)
+        self.paned_window.add(self.plot_container, weight=3)  # 初始权重设为3
         # 创建画布和滚动条 (左侧控制面板内)
-        self.canvas = tk.Canvas(self.control_container, bg="#FFFFFF", highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(self.control_container, orient="vertical", command=self.canvas.yview)
-        self.scrollable_frame = ttk.Frame(self.canvas)
-        
-        # 配置画布滚动
-        self.scrollable_frame.bind(
-            "<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        )
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-        
-        # 绑定鼠标滚轮事件
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-        
-        # 绑定画布大小变化事件
-        self.canvas.bind("<Configure>", self._on_canvas_resize)
-        
-        # 布局画布和滚动条
-        self.canvas.pack(side="left", fill="both", expand=True, padx=(0, 2))
-        self.scrollbar.pack(side="right", fill="y", padx=(0, 2))
-        
-        # 控制面板框架
-        self.control_frame = ttk.LabelFrame(self.scrollable_frame, text="控制面板", padding=10)
-        self.control_frame.pack(fill=tk.X, expand=True)
-        
-        # 添加3D切换按钮
-        self.btn_switch_3d = ttk.Button(self.control_frame, text="切换3D视图", 
-                                      command=self.toggle_3d_view)
-        self.btn_switch_3d.pack(fill=tk.X, pady=5)
-        
-        # 初始化线段样式默认值
-        self.segment_color = '#0000FF'  # 默认蓝色
-        self.segment_linestyle = 'solid'  # 默认实线
-        
-        # 创建功能选项卡
-        self.notebook = ttk.Notebook(self.control_frame)
-        self.notebook.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        # 几何操作选项卡
-        self.geo_ops_tab = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(self.geo_ops_tab, text="几何操作")
-        self._setup_geo_ops_tab()
-        
-        # 向量计算选项卡（新增）
-        self.vector_tab = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(self.vector_tab, text="向量计算")
-        self._setup_vector_tab()
-        
-        # 分析选项卡
-        self.analysis_tab = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(self.analysis_tab, text="分析结果")
-        self._setup_analysis_tab()
-        
-        # 状态选项卡
-        self.status_tab = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(self.status_tab, text="状态信息")
-        self._setup_status_tab()
-        
+        self._create_scrollable_control_panel()
         # 右侧绘图区框架
         self.plot_frame = ttk.LabelFrame(self.plot_container, text="几何图形", padding=10)
         self.plot_frame.pack(fill=tk.BOTH, expand=True)
-        
         # 创建绘图区域和工具栏
-        self.fig = Figure(figsize=(8, 6), dpi=100, facecolor="white")
+        self.fig = Figure(figsize=(8, 6), dpi=100, facecolor="#F5F6F7")
         self.canvas_plot = FigureCanvasTkAgg(self.fig, self.plot_frame)
         self.canvas_plot.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
         # 添加Matplotlib导航工具栏
         self.toolbar = NavigationToolbar2Tk(self.canvas_plot, self.plot_frame)
         self.toolbar.update()
-
-        # 添加交互模式切换按钮到控制面板
-        self.btn_interaction = ttk.Button(self.control_frame, text="交互模式: 关闭", 
-                                        command=self.toggle_interaction_mode)
-        self.btn_interaction.pack(fill=tk.X, pady=5)
-        
-        # 交互模式状态
-        self.interaction_mode = False
-        self.selected_points = []  # 存储用户选择的点
-        
-        # 绑定图形点击事件
-        self.canvas_plot.mpl_connect('button_press_event', self.on_plot_click)
-        
         # 初始化2D绘图
         self.ax = self.fig.add_subplot(111)
-        self.ax.set_facecolor("white")  # 白色背景
-        self.ax.grid(True, linestyle='--', alpha=0.7)
+        self.ax.set_facecolor("white")
+        self.ax.grid(True, linestyle='--', alpha=0.6)
         self.ax.set_title("2D几何视图", color="black")
         self.ax.tick_params(colors='black')
-        self.ax.set_aspect('equal')  # 确保2D视图等比例
-        
+        self.ax.set_aspect('equal')
         # 当前视图模式
         self.current_view = '2d'
-        
+        # 绑定图形点击事件
+        self.canvas_plot.mpl_connect('button_press_event', self.on_plot_click)
         # 初始化示例数据
         self._add_sample_data()
-        
         # 绑定关闭窗口事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-    def _setup_left_panel(self):
-        """设置左侧控制面板（带滚动条）"""
+    def _configure_modern_style(self):
+        """配置现代UI样式"""
+        style = ttk.Style()
+        style.theme_use("clam")
+        # 主题基础颜色
+        bg_color = "#F5F6F7"
+        fg_color = "#2D3436"
+        accent_color = "#3B82F6"  # 蓝色系
+        accent_light = "#60A5FA"
+        card_color = "white"
+        # 全局配置
+        style.configure(".", 
+                      background=bg_color,
+                      foreground=fg_color,
+                      font=('Segoe UI', 10))
+        # 按钮样式
+        style.configure("TButton",
+                      padding=6,
+                      relief="flat",
+                      background=accent_color,
+                      foreground="white",
+                      font=('Segoe UI', 10, 'bold'))
+        style.map("TButton",
+                 background=[('active', accent_light), ('pressed', '#2563EB')],
+                 relief=[('pressed', 'sunken')])
+        # 标签框架样式
+        style.configure("TLabelframe",
+                      background=bg_color,
+                      foreground=fg_color,
+                      borderwidth=2)
+        style.configure("TLabelframe.Label",
+                      background=bg_color,
+                      foreground=fg_color,
+                      font=('Segoe UI', 11, 'bold'))
+        # 选项卡样式
+        style.configure("TNotebook",
+                      background=bg_color,
+                      borderwidth=0)
+        style.configure("TNotebook.Tab",
+                      padding=[15, 8],
+                      background=card_color,
+                      foreground=fg_color,
+                      font=('Segoe UI', 10, 'bold'),
+                      borderwidth=0,
+                      lightcolor=bg_color,
+                      darkcolor=bg_color)
+        style.map("TNotebook.Tab",
+                 background=[('selected', accent_color)],
+                 foreground=[('selected', 'white')],
+                 relief=[('selected', 'flat')])
+        # 输入框样式
+        style.configure("TEntry",
+                      fieldbackground="white",
+                      borderwidth=1,
+                      relief="flat",
+                      padding=5)
+        style.configure("TCombobox",
+                      fieldbackground="white",
+                      borderwidth=1,
+                      arrowcolor=fg_color)
+        # 滚动条样式
+        style.configure("Vertical.TScrollbar",
+                      background=card_color,
+                      borderwidth=0,
+                      arrowsize=12)
+        style.map("Vertical.TScrollbar",
+                 background=[('active', '#E5E7EB')])
+        # 复选框样式
+        style.configure("TCheckbutton",
+                      background=bg_color,
+                      foreground=fg_color,
+                      font=('Segoe UI', 10))
+        # 进度条样式
+        style.configure("Horizontal.TProgressbar",
+                      background=accent_color,
+                      thickness=10,
+                      borderwidth=0)
+
+    def _create_scrollable_control_panel(self):
+        """创建带滚动条的控制面板"""
         # 创建画布和滚动条
-        self.canvas = tk.Canvas(self.control_container, bg="#FFFFFF", highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(self.control_container, orient="vertical", command=self.canvas.yview)
+        self.canvas = tk.Canvas(self.control_container, 
+                              bg="#F5F6F7", 
+                              highlightthickness=0,
+                              width=300)
+        self.scrollbar = ttk.Scrollbar(self.control_container, 
+                                    orient="vertical", 
+                                    command=self.canvas.yview)
         self.scrollable_frame = ttk.Frame(self.canvas)
-        
-        # 配置画布滚动
+        # 配置滚动
         self.scrollable_frame.bind(
             "<Configure>",
             lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         )
         self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
-        
         # 绑定鼠标滚轮事件
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-        
+        self.canvas.bind("<Configure>", self._on_canvas_resize)
         # 布局画布和滚动条
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
+        self.canvas.pack(side="left", fill=tk.BOTH, expand=True, padx=(0, 2))
+        self.scrollbar.pack(side="right", fill="y", padx=(0, 2))
         # 控制面板框架
-        self.control_frame = ttk.LabelFrame(self.scrollable_frame, text="控制面板", padding=10)
-        self.control_frame.pack(fill=tk.X, expand=True, pady=5)
-        
-        # 添加3D切换按钮
-        self.btn_switch_3d = ttk.Button(self.control_frame, text="切换3D视图", 
-                                    command=self.toggle_3d_view)
-        self.btn_switch_3d.pack(fill=tk.X, pady=5)
-        
+        self.control_frame = ttk.LabelFrame(self.scrollable_frame, 
+                                       text="控制面板", 
+                                       padding=15)
+        self.control_frame.pack(fill=tk.X, expand=True)
         # 创建功能选项卡
         self.notebook = ttk.Notebook(self.control_frame)
-        self.notebook.pack(fill=tk.BOTH, expand=True, pady=5)
-        
+        self.notebook.pack(fill=tk.BOTH, expand=True, pady=6)
         # 几何操作选项卡
-        self.geo_ops_tab = ttk.Frame(self.notebook, padding=10)
+        self.geo_ops_tab = ttk.Frame(self.scrollable_frame, padding=10)
         self.notebook.add(self.geo_ops_tab, text="几何操作")
         self._setup_geo_ops_tab()
-        
         # 向量计算选项卡
-        self.vector_tab = ttk.Frame(self.notebook, padding=10)
+        self.vector_tab = ttk.Frame(self.scrollable_frame, padding=10)
         self.notebook.add(self.vector_tab, text="向量计算")
         self._setup_vector_tab()
-        
         # 分析选项卡
-        self.analysis_tab = ttk.Frame(self.notebook, padding=10)
+        self.analysis_tab = ttk.Frame(self.scrollable_frame, padding=10)
         self.notebook.add(self.analysis_tab, text="分析结果")
         self._setup_analysis_tab()
-        
         # 状态选项卡
-        self.status_tab = ttk.Frame(self.notebook, padding=10)
+        self.status_tab = ttk.Frame(self.scrollable_frame, padding=10)
         self.notebook.add(self.status_tab, text="状态信息")
         self._setup_status_tab()
-
-    def _setup_right_panel(self):
-        """设置右侧绘图区域"""
-        # 右侧绘图区框架
-        self.plot_frame = ttk.LabelFrame(self.plot_container, text="几何图形", padding=10)
-        self.plot_frame.pack(fill=tk.BOTH, expand=True)
         
-        # 创建绘图区域和工具栏
-        self.fig = Figure(figsize=(8, 6), dpi=100, facecolor="white")
-        self.canvas_plot = FigureCanvasTkAgg(self.fig, self.plot_frame)
-        self.canvas_plot.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # 添加Matplotlib导航工具栏
-        self.toolbar = NavigationToolbar2Tk(self.canvas_plot, self.plot_frame)
-        self.toolbar.update()
-        
-        # 初始化2D绘图
-        self.ax = self.fig.add_subplot(111)
-        self.ax.set_facecolor("white")  # 白色背景
-        self.ax.grid(True, linestyle='--', alpha=0.7)
-        self.ax.set_title("2D几何视图", color="black")
-        self.ax.tick_params(colors='black')
-        self.ax.set_aspect('equal')  # 确保2D视图等比例
-        
-        # 当前视图模式
-        self.current_view = '2d'
-
 
     def _on_canvas_resize(self, event):
-        """当画布大小变化时调整滚动框架宽度"""
-        # 设置滚动框架宽度等于画布可见宽度
-        self.canvas.itemconfig("all", width=event.width)
-        self.scrollable_frame.config(width=event.width)
-
-    def _on_mousewheel(self, event):
-        """处理鼠标滚轮事件"""
-        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        """调整滚动框架宽度"""
+        canvas_width = event.width
+        self.canvas.itemconfig("all", width=canvas_width)
+        self.scrollable_frame.config(width=canvas_width)
 
     def _setup_geo_ops_tab(self):
-        """设置几何操作选项卡（优化版）"""
-        style = ttk.Style()
-        style.configure("TButton", padding=6, relief="flat", background="#4CAF50")
-        style.configure("TCombobox", padding=5)
-
-        # ==================== 添加点区域 ====================
-        point_frame = ttk.LabelFrame(self.geo_ops_tab, text="添加新点", padding=10)
-        point_frame.pack(fill=tk.X, pady=5, expand=True)
-        point_frame.columnconfigure(1, weight=1)
-
+        """设置几何操作选项卡（极简现代版）"""
+        # 点添加区域
+        point_frame = ttk.LabelFrame(self.geo_ops_tab, text="📌 添加新点", padding=12)
+        point_frame.pack(fill=tk.X, pady=8)
+        
         fields = [
-            ("点名称:", "point_name", tk.StringVar()),
-            ("X坐标:", "point_x", tk.StringVar()),
-            ("Y坐标:", "point_y", tk.StringVar()),
-            ("Z坐标:", "point_z", tk.StringVar(value="0")),
+            ("名称:", "point_name", tk.StringVar()),
+            ("X 坐标:", "point_x", tk.StringVar()),
+            ("Y 坐标:", "point_y", tk.StringVar()),
+            ("Z 坐标:", "point_z", tk.StringVar(value="0")),
         ]
-
+        
         for i, (label_text, attr_name, var) in enumerate(fields):
             setattr(self, attr_name, var)
-            ttk.Label(point_frame, text=label_text).grid(row=i, column=0, sticky=tk.W, pady=5)
+            ttk.Label(point_frame, text=label_text).grid(
+                row=i, column=0, sticky=tk.W, pady=4)
             entry = ttk.Entry(point_frame, textvariable=var)
-            entry.grid(row=i, column=1, sticky="ew", padx=5, pady=5)
-
+            entry.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
+        
         ttk.Button(point_frame, text="添加点", command=self.add_point).grid(
-            row=len(fields), column=0, columnspan=2, sticky="ew", pady=10, padx=5
-        )
+            row=len(fields), column=0, columnspan=2, sticky="ew", pady=8)
 
-        # ==================== 添加线段区域 ====================
-        segment_frame = ttk.LabelFrame(self.geo_ops_tab, text="添加线段", padding=10)
-        segment_frame.pack(fill=tk.X, pady=5, expand=True)
-        segment_frame.columnconfigure(1, weight=1)
-
+        # 线段添加区域
+        segment_frame = ttk.LabelFrame(self.geo_ops_tab, text="🔗 添加线段", padding=12)
+        segment_frame.pack(fill=tk.X, pady=8)
+        
         self.start_point = tk.StringVar()
         self.end_point = tk.StringVar()
-
-        ttk.Label(segment_frame, text="起点:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        
+        ttk.Label(segment_frame, text="起点:").grid(row=0, column=0, sticky=tk.W, pady=4)
         self.start_combo = ttk.Combobox(segment_frame, textvariable=self.start_point, state="readonly")
-        self.start_combo.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
-
-        ttk.Label(segment_frame, text="终点:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        self.start_combo.grid(row=0, column=1, sticky="ew", padx=5, pady=4)
+        
+        ttk.Label(segment_frame, text="终点:").grid(row=1, column=0, sticky=tk.W, pady=4)
         self.end_combo = ttk.Combobox(segment_frame, textvariable=self.end_point, state="readonly")
-        self.end_combo.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
-
-        # 颜色选择
-        ttk.Label(segment_frame, text="颜色:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        self.end_combo.grid(row=1, column=1, sticky="ew", padx=5, pady=4)
+        
+        # 颜色选择按钮
         color_frame = ttk.Frame(segment_frame)
-        color_frame.grid(row=2, column=1, sticky="ew", pady=5)
-        self.color_preview = tk.Canvas(color_frame, width=20, height=20, bg="black")
-        self.color_preview.pack(side=tk.LEFT, padx=(0, 5))
+        color_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=6)
+        self.color_preview = tk.Canvas(color_frame, width=24, height=24, bg="black", bd=0)
+        self.color_preview.pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(color_frame, text="选择颜色", command=self.choose_segment_color).pack(
-            side=tk.LEFT, fill=tk.X, expand=True
-        )
-
+            side=tk.LEFT, fill=tk.X, expand=True)
+        
         # 线型选择
-        ttk.Label(segment_frame, text="线型:").grid(row=3, column=0, sticky=tk.W, pady=5)
+        ttk.Label(segment_frame, text="线型:").grid(row=3, column=0, sticky=tk.W, pady=4)
         self.linestyle_var = tk.StringVar(value='solid')
         ttk.Combobox(
             segment_frame,
             textvariable=self.linestyle_var,
             state="readonly",
             values=['solid', 'dashed', 'dotted', 'dashdot']
-        ).grid(row=3, column=1, sticky="ew", padx=5, pady=5)
-
+        ).grid(row=3, column=1, sticky="ew", padx=5, pady=4)
+        
         ttk.Button(segment_frame, text="添加线段", command=self.add_segment).grid(
-            row=4, column=0, columnspan=2, sticky="ew", pady=10, padx=5
-        )
+            row=4, column=0, columnspan=2, sticky="ew", pady=8)
 
-        # ==================== 删除操作区域 ====================
-        delete_frame = ttk.LabelFrame(self.geo_ops_tab, text="删除操作", padding=10)
-        delete_frame.pack(fill=tk.X, pady=5, expand=True)
-        delete_frame.columnconfigure(1, weight=1)
+        # 删除操作区域
+        delete_frame = ttk.LabelFrame(self.geo_ops_tab, text="🗑️ 删除操作", padding=12)
+        delete_frame.pack(fill=tk.X, pady=8)
 
         self.delete_type = tk.StringVar(value='点')
         self.delete_object = tk.StringVar()
 
-        ttk.Label(delete_frame, text="删除类型:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        ttk.Label(delete_frame, text="删除类型:").grid(row=0, column=0, sticky=tk.W, pady=4)
         ttk.Combobox(delete_frame, textvariable=self.delete_type, state="readonly",
-                    values=['点', '线段']).grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+                    values=['点', '线段', '向量', '计算结果']).grid(row=0, column=1, sticky="ew", padx=5, pady=4)
 
-        ttk.Label(delete_frame, text="选择对象:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        ttk.Label(delete_frame, text="选择对象:").grid(row=1, column=0, sticky=tk.W, pady=4)
         self.delete_combo = ttk.Combobox(delete_frame, textvariable=self.delete_object, state="readonly")
-        self.delete_combo.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
+        self.delete_combo.grid(row=1, column=1, sticky="ew", padx=5, pady=4)
 
         ttk.Button(delete_frame, text="删除", command=self.delete_object_action).grid(
-            row=2, column=0, columnspan=2, sticky="ew", pady=10, padx=5
-        )
+            row=2, column=0, columnspan=2, sticky="ew", pady=8)
 
-        # ==================== 向量管理区域 ====================
-        vector_frame = ttk.LabelFrame(self.geo_ops_tab, text="向量管理", padding=10)
-        vector_frame.pack(fill=tk.X, pady=5, expand=True)
-        vector_frame.columnconfigure(1, weight=1)
-
-        ttk.Label(vector_frame, text="删除向量:").grid(row=0, column=0, sticky=tk.W, pady=5)
-        self.vector_delete_combo = ttk.Combobox(vector_frame, state="readonly")
-        self.vector_delete_combo.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
-
-        ttk.Button(vector_frame, text="删除选定向量", command=self.delete_selected_vector).grid(
-            row=0, column=2, padx=5, pady=5
-        )
-        ttk.Button(vector_frame, text="清除所有向量", command=self.clear_all_vectors).grid(
-            row=0, column=3, padx=5, pady=5
-        )
-
-        # ==================== 计算结果管理区域 ====================
-        calc_frame = ttk.LabelFrame(self.geo_ops_tab, text="计算结果管理", padding=10)
-        calc_frame.pack(fill=tk.X, pady=5, expand=True)
-        calc_frame.columnconfigure(1, weight=1)
-
-        ttk.Label(calc_frame, text="删除计算结果:").grid(row=0, column=0, sticky=tk.W, pady=5)
-        self.calculation_delete_combo = ttk.Combobox(calc_frame, state="readonly")
-        self.calculation_delete_combo.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
-
-        ttk.Button(calc_frame, text="删除选定结果", command=self.delete_selected_calculation).grid(
-            row=0, column=2, padx=5, pady=5
-        )
-        ttk.Button(calc_frame, text="清除所有计算结果", command=self.clear_all_calculations).grid(
-            row=0, column=3, padx=5, pady=5
-        )
-
-        # ==================== 几何作图区域 ====================
-        construction_frame = ttk.LabelFrame(self.geo_ops_tab, text="几何作图", padding=10)
-        construction_frame.pack(fill=tk.X, pady=5, expand=True)
-        for i in range(6):
-            construction_frame.columnconfigure(i, weight=1)
-
-        # 垂直线
-        ttk.Label(construction_frame, text="过").grid(row=0, column=0, sticky=tk.W, pady=2)
-        self.perp_point = tk.StringVar()
-        self.perp_point_combo = ttk.Combobox(construction_frame, textvariable=self.perp_point, state="readonly")
-        self.perp_point_combo.grid(row=0, column=1, padx=5, pady=2, sticky="ew")
-        ttk.Label(construction_frame, text="作").grid(row=0, column=2, sticky=tk.W, pady=2)
-        self.perp_segment = tk.StringVar()
-        self.perp_segment_combo = ttk.Combobox(construction_frame, textvariable=self.perp_segment, state="readonly")
-        self.perp_segment_combo.grid(row=0, column=3, padx=5, pady=2, sticky="ew")
-        ttk.Label(construction_frame, text="的垂线").grid(row=0, column=4, sticky=tk.W, pady=2)
-        ttk.Button(construction_frame, text="创建", command=self.draw_perpendicular).grid(
-            row=0, column=5, padx=5, pady=2, sticky="ew"
-        )
-
-        # 平行线
-        ttk.Label(construction_frame, text="过").grid(row=1, column=0, sticky=tk.W, pady=2)
-        self.parallel_point = tk.StringVar()
-        self.parallel_point_combo = ttk.Combobox(construction_frame, textvariable=self.parallel_point, state="readonly")
-        self.parallel_point_combo.grid(row=1, column=1, padx=5, pady=2, sticky="ew")
-        ttk.Label(construction_frame, text="作").grid(row=1, column=2, sticky=tk.W, pady=2)
-        self.parallel_segment = tk.StringVar()
-        self.parallel_segment_combo = ttk.Combobox(construction_frame, textvariable=self.parallel_segment, state="readonly")
-        self.parallel_segment_combo.grid(row=1, column=3, padx=5, pady=2, sticky="ew")
-        ttk.Label(construction_frame, text="的平行线").grid(row=1, column=4, sticky=tk.W, pady=2)
-        ttk.Button(construction_frame, text="创建", command=self.draw_parallel).grid(
-            row=1, column=5, padx=5, pady=2, sticky="ew"
-        )
-
-        # 中点
-        ttk.Label(construction_frame, text="作").grid(row=2, column=0, sticky=tk.W, pady=2)
-        self.mid_segment = tk.StringVar()
-        self.mid_segment_combo = ttk.Combobox(construction_frame, textvariable=self.mid_segment, state="readonly")
-        self.mid_segment_combo.grid(row=2, column=1, padx=5, pady=2, sticky="ew")
-        ttk.Label(construction_frame, text="的中点").grid(row=2, column=2, sticky=tk.W, pady=2)
-        ttk.Button(construction_frame, text="创建", command=self.draw_midpoint).grid(
-            row=2, column=5, padx=5, pady=2, sticky="e"
-        )
-
-        # 圆/球
-        ttk.Label(construction_frame, text="以").grid(row=3, column=0, sticky=tk.W, pady=2)
-        self.circle_center = tk.StringVar()
-        self.circle_center_combo = ttk.Combobox(construction_frame, textvariable=self.circle_center, state="readonly")
-        self.circle_center_combo.grid(row=3, column=1, padx=5, pady=2, sticky="ew")
-        ttk.Label(construction_frame, text="为圆心").grid(row=3, column=2, sticky=tk.W, pady=2)
-        self.circle_radius = tk.StringVar()
-        self.circle_radius_combo = ttk.Combobox(construction_frame, textvariable=self.circle_radius, state="readonly")
-        self.circle_radius_combo.grid(row=3, column=3, padx=5, pady=2, sticky="ew")
-        ttk.Label(construction_frame, text="为半径作圆/球").grid(row=3, column=4, sticky=tk.W, pady=2)
-        ttk.Button(construction_frame, text="创建", command=self.draw_circle).grid(
-            row=3, column=5, padx=5, pady=2, sticky="ew"
-        )
-
-        # 新增函数输入区域
-        function_frame = ttk.LabelFrame(self.geo_ops_tab, text="函数输入", padding=10)
-        function_frame.pack(fill=tk.X, pady=5, expand=True)
-
-        ttk.Label(function_frame, text="函数名称:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        # 函数输入区域
+        function_frame = ttk.LabelFrame(self.geo_ops_tab, text="⨍ 函数输入", padding=12)
+        function_frame.pack(fill=tk.X, pady=8)
+        
         self.function_name = tk.StringVar()
-        ttk.Entry(function_frame, textvariable=self.function_name).grid(row=0, column=1, sticky="ew", padx=5, pady=2)
-
-        ttk.Label(function_frame, text="函数表达式:").grid(row=1, column=0, sticky=tk.W, pady=2)
         self.function_expr = tk.StringVar()
-        ttk.Entry(function_frame, textvariable=self.function_expr).grid(row=1, column=1, sticky="ew", padx=5, pady=2)
-
-        ttk.Label(function_frame, text="变量:").grid(row=2, column=0, sticky=tk.W, pady=2)
         self.function_var = tk.StringVar(value="x")
-        ttk.Entry(function_frame, textvariable=self.function_var).grid(row=2, column=1, sticky="ew", padx=5, pady=2)
-
-        ttk.Label(function_frame, text="范围:").grid(row=3, column=0, sticky=tk.W, pady=2)
         self.function_range_min = tk.StringVar(value="0")
         self.function_range_max = tk.StringVar(value="10")
-        ttk.Entry(function_frame, textvariable=self.function_range_min, width=5).grid(row=3, column=1, sticky="w", padx=5, pady=2)
-        ttk.Label(function_frame, text="到").grid(row=3, column=1, sticky=tk.E, padx=5, pady=2)
-        ttk.Entry(function_frame, textvariable=self.function_range_max, width=5).grid(row=3, column=1, sticky="e", padx=5, pady=2)
-
-        ttk.Label(function_frame, text="类型:").grid(row=4, column=0, sticky=tk.W, pady=2)
         self.function_type = tk.StringVar(value="2d")
-        ttk.Radiobutton(function_frame, text="2D", variable=self.function_type, value="2d").grid(row=4, column=1, sticky="w", padx=5, pady=2)
-        ttk.Radiobutton(function_frame, text="3D", variable=self.function_type, value="3d").grid(row=4, column=1, sticky="e", padx=5, pady=2)
-
+        
+        ttk.Label(function_frame, text="函数名称:").grid(row=0, column=0, sticky=tk.W, pady=4)
+        ttk.Entry(function_frame, textvariable=self.function_name).grid(
+            row=0, column=1, sticky="ew", padx=5, pady=4)
+        
+        ttk.Label(function_frame, text="表达式:").grid(row=1, column=0, sticky=tk.W, pady=4)
+        ttk.Entry(function_frame, textvariable=self.function_expr).grid(
+            row=1, column=1, sticky="ew", padx=5, pady=4)
+        
+        ttk.Label(function_frame, text="变量:").grid(row=2, column=0, sticky=tk.W, pady=4)
+        ttk.Entry(function_frame, textvariable=self.function_var).grid(
+            row=2, column=1, sticky="ew", padx=5, pady=4)
+        
+        range_frame = ttk.Frame(function_frame)
+        range_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=4)
+        ttk.Label(range_frame, text="范围:").pack(side=tk.LEFT)
+        ttk.Entry(range_frame, textvariable=self.function_range_min, width=8).pack(
+            side=tk.LEFT, padx=(5, 2))
+        ttk.Label(range_frame, text="→").pack(side=tk.LEFT)
+        ttk.Entry(range_frame, textvariable=self.function_range_max, width=8).pack(
+            side=tk.LEFT, padx=(2, 5))
+        
+        type_frame = ttk.Frame(function_frame)
+        type_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=4)
+        ttk.Label(type_frame, text="类型:").pack(side=tk.LEFT)
+        ttk.Radiobutton(type_frame, text="2D", variable=self.function_type, value="2d").pack(
+            side=tk.LEFT, padx=5)
+        ttk.Radiobutton(type_frame, text="3D", variable=self.function_type, value="3d").pack(
+            side=tk.LEFT)
+        
         ttk.Button(function_frame, text="添加函数", command=self.add_function).grid(
-            row=5, column=0, columnspan=2, sticky="ew", pady=10, padx=5
-        )
-
-        # ==================== 删除函数区域 ====================
-        delete_function_frame = ttk.LabelFrame(self.geo_ops_tab, text="删除函数", padding=10)
-        delete_function_frame.pack(fill=tk.X, pady=5, expand=True)
-        delete_function_frame.columnconfigure(1, weight=1)
-
-        ttk.Label(delete_function_frame, text="函数名称:").grid(row=0, column=0, sticky=tk.W, pady=2)
-        self.delete_function_name = tk.StringVar()
-        self.delete_function_combo = ttk.Combobox(delete_function_frame,
-                                                textvariable=self.delete_function_name,
-                                                state="readonly")
-        self.delete_function_combo.grid(row=0, column=1, sticky="ew", padx=5, pady=2)
-
-        ttk.Button(delete_function_frame, text="删除函数", command=self.delete_function).grid(
-            row=1, column=0, columnspan=2, sticky="ew", pady=10, padx=5
-        )
-
-        # 初始化下拉框内容
-        self._update_delete_function_combo()
-
-        # ==================== 绑定事件 ====================
-        self.point_name.trace_add("write", lambda *args: self._update_combo_boxes())
-        self.delete_type.trace_add("write", lambda *args: self._update_delete_combo())
+            row=5, column=0, columnspan=2, sticky="ew", pady=8)
 
     def _setup_vector_tab(self):
-        """设置向量计算选项卡（新增核心功能，优化版）"""
-        vector_frame = ttk.LabelFrame(self.vector_tab, text="向量输入", padding=10)
-        vector_frame.pack(fill=tk.X, pady=5, expand=True)
-
+        """设置向量计算选项卡（现代风格）"""
+        vector_frame = ttk.LabelFrame(self.vector_tab, text="🔢 向量输入", padding=12)
+        vector_frame.pack(fill=tk.X, pady=8)
+        
         # 设置网格列权重
         for i in range(4):
             vector_frame.columnconfigure(i, weight=1 if i % 2 == 1 else 0)
-
+        
         # 向量1输入
-        ttk.Label(vector_frame, text="向量1 (起点→终点):").grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=5)
-        ttk.Label(vector_frame, text="起点:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        ttk.Label(vector_frame, text="🔹 向量1 (起点→终点):").grid(
+            row=0, column=0, columnspan=2, sticky=tk.W, pady=6)
+        
         self.vec1_start = tk.StringVar()
-        self.vec1_start_combo = ttk.Combobox(vector_frame, textvariable=self.vec1_start, state="readonly")
-        self.vec1_start_combo.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
-
-        ttk.Label(vector_frame, text="终点:").grid(row=2, column=0, sticky=tk.W, pady=2)
         self.vec1_end = tk.StringVar()
+        
+        ttk.Label(vector_frame, text="起点:").grid(row=1, column=0, sticky=tk.W, pady=4)
+        self.vec1_start_combo = ttk.Combobox(vector_frame, textvariable=self.vec1_start, state="readonly")
+        self.vec1_start_combo.grid(row=1, column=1, sticky="ew", padx=5, pady=4)
+        
+        ttk.Label(vector_frame, text="终点:").grid(row=2, column=0, sticky=tk.W, pady=4)
         self.vec1_end_combo = ttk.Combobox(vector_frame, textvariable=self.vec1_end, state="readonly")
-        self.vec1_end_combo.grid(row=2, column=1, sticky="ew", padx=5, pady=2)
-
+        self.vec1_end_combo.grid(row=2, column=1, sticky="ew", padx=5, pady=4)
+        
         # 向量2输入
-        ttk.Label(vector_frame, text="向量2 (起点→终点):").grid(row=0, column=2, columnspan=2, sticky=tk.W, pady=5)
-        ttk.Label(vector_frame, text="起点:").grid(row=1, column=2, sticky=tk.W, pady=2)
+        ttk.Label(vector_frame, text="🔹 向量2 (起点→终点):").grid(
+            row=0, column=2, columnspan=2, sticky=tk.W, pady=6)
+        
         self.vec2_start = tk.StringVar()
-        self.vec2_start_combo = ttk.Combobox(vector_frame, textvariable=self.vec2_start, state="readonly")
-        self.vec2_start_combo.grid(row=1, column=3, sticky="ew", padx=5, pady=2)
-
-        ttk.Label(vector_frame, text="终点:").grid(row=2, column=2, sticky=tk.W, pady=2)
         self.vec2_end = tk.StringVar()
+        
+        ttk.Label(vector_frame, text="起点:").grid(row=1, column=2, sticky=tk.W, pady=4)
+        self.vec2_start_combo = ttk.Combobox(vector_frame, textvariable=self.vec2_start, state="readonly")
+        self.vec2_start_combo.grid(row=1, column=3, sticky="ew", padx=5, pady=4)
+        
+        ttk.Label(vector_frame, text="终点:").grid(row=2, column=2, sticky=tk.W, pady=4)
         self.vec2_end_combo = ttk.Combobox(vector_frame, textvariable=self.vec2_end, state="readonly")
-        self.vec2_end_combo.grid(row=2, column=3, sticky="ew", padx=5, pady=2)
-
+        self.vec2_end_combo.grid(row=2, column=3, sticky="ew", padx=5, pady=4)
+        
         # 直接输入坐标
-        ttk.Label(vector_frame, text="(可选) 直接输入向量坐标:").grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=(10, 2))
+        ttk.Label(vector_frame, text="或直接输入坐标:").grid(
+            row=3, column=0, columnspan=4, sticky=tk.W, pady=6)
+        
         self.vec1_input = tk.StringVar(value="0,0,0")
-        ttk.Entry(vector_frame, textvariable=self.vec1_input).grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=2)
         self.vec2_input = tk.StringVar(value="0,0,0")
-        ttk.Entry(vector_frame, textvariable=self.vec2_input).grid(row=4, column=2, columnspan=2, sticky="ew", padx=5, pady=2)
-
+        
+        ttk.Entry(vector_frame, textvariable=self.vec1_input).grid(
+            row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=4)
+        ttk.Entry(vector_frame, textvariable=self.vec2_input).grid(
+            row=4, column=2, columnspan=2, sticky="ew", padx=5, pady=4)
+        
         # 计算类型选择
-        ttk.Label(vector_frame, text="计算类型:").grid(row=5, column=0, sticky=tk.W, pady=5)
+        calc_frame = ttk.Frame(vector_frame)
+        calc_frame.grid(row=5, column=0, columnspan=4, sticky="ew", pady=8)
+        
+        ttk.Label(calc_frame, text="运算类型:").pack(side=tk.LEFT, padx=(0, 10))
         self.calc_type = tk.StringVar(value="点积")
-        calc_combo = ttk.Combobox(vector_frame, textvariable=self.calc_type, state="readonly",
-                                values=["加法", "减法", "点积", "叉积", "模长(向量1)", "模长(向量2)", "夹角"])
-        calc_combo.grid(row=5, column=1, sticky="ew", padx=5, pady=5)
-
-        # 计算按钮
-        ttk.Button(vector_frame, text="执行计算", command=self.calculate_vector).grid(
-            row=5, column=2, columnspan=2, sticky="ew", padx=5, pady=5)
+        calc_combo = ttk.Combobox(
+            calc_frame,
+            textvariable=self.calc_type,
+            state="readonly",
+            values=[
+                "加法", "减法", "点积", "叉积",
+                "模长1", "模长2", "夹角"
+            ],
+            width=5
+        )
+        calc_combo.pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(calc_frame, text="执行计算", command=self.calculate_vector).pack(
+              side=tk.LEFT, padx=2)
 
         # 结果显示区域
-        result_frame = ttk.LabelFrame(self.vector_tab, text="计算结果", padding=10)
-        result_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-
+        result_frame = ttk.LabelFrame(self.vector_tab, text="📊 计算结果", padding=12)
+        result_frame.pack(fill=tk.BOTH, expand=True, pady=8)
+        
         self.vector_result = scrolledtext.ScrolledText(result_frame,
-                                                    bg="white",
-                                                    fg="black",
-                                                    insertbackground="black",
-                                                    font=("Consolas", 10),
-                                                    height=10)
-        self.vector_result.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+                                                  bg="white",
+                                                  fg="black",
+                                                  insertbackground="black",
+                                                  font=("Consolas", 10),
+                                                  height=12,
+                                                  wrap=tk.WORD)
+        self.vector_result.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self.vector_result.insert(tk.END, "选择向量并点击'执行计算'查看结果...\n")
         self.vector_result.config(state=tk.DISABLED)
 
-        # 绑定点选择事件更新向量输入
-        points = list(self.analyzer.points.keys())
-        self.vec1_start_combo['values'] = points
-        self.vec1_end_combo['values'] = points
-        self.vec2_start_combo['values'] = points
-        self.vec2_end_combo['values'] = points
-
-        if points:
-            self.vec1_start_combo.current(0)
-            self.vec1_end_combo.current(1 if len(points) > 1 else 0)
-            self.vec2_start_combo.current(0)
-            self.vec2_end_combo.current(1 if len(points) > 1 else 0)
-
     def _setup_analysis_tab(self):
-        """设置分析选项卡（优化版）"""
+        """设置分析选项卡（现代风格）"""
         result_frame = ttk.Frame(self.analysis_tab)
         result_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-
+        
         # 分析按钮
-        analyze_btn = ttk.Button(result_frame, text="运行几何分析", command=self.analyze_geometry)
-        analyze_btn.pack(fill=tk.X, pady=(0, 15))
-
+        analyze_btn = ttk.Button(result_frame, text="🔍 运行几何分析", command=self.analyze_geometry)
+        analyze_btn.pack(fill=tk.X, pady=(0, 12))
+        
         # 结果标题
-        ttk.Label(result_frame, text="几何关系分析结果:").pack(anchor=tk.W, pady=(0, 5))
-
+        ttk.Label(result_frame, text="📌 几何关系分析结果:", font=('Segoe UI', 11, 'bold')).pack(
+            anchor=tk.W, pady=(0, 8))
+        
         # 结果文本框
         self.result_text = scrolledtext.ScrolledText(result_frame,
                                                     bg="white",
                                                     fg="black",
                                                     insertbackground="black",
-                                                    font=("Consolas", 9),
-                                                    height=15)
-        self.result_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+                                                    font=("Segoe UI", 10),
+                                                    height=18,
+                                                    wrap=tk.WORD)
+        self.result_text.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self.result_text.insert(tk.END, "点击上方按钮分析几何关系...\n")
         self.result_text.insert(tk.END, "结果将显示在此区域\n")
         self.result_text.config(state=tk.DISABLED)
 
     def _setup_status_tab(self):
-        """设置状态选项卡（优化版）"""
+        """设置状态选项卡（现代风格）"""
         status_frame = ttk.Frame(self.status_tab)
         status_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-
+        
         # 状态文本框
         self.status_text = scrolledtext.ScrolledText(status_frame,
                                                     bg="white",
                                                     fg="black",
                                                     insertbackground="black",
-                                                    font=("Consolas", 9),
-                                                    height=15)
-        self.status_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+                                                    font=("Consolas", 10),
+                                                    height=20,
+                                                    wrap=tk.WORD)
+        self.status_text.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self.status_text.insert(tk.END, "状态信息将显示在此\n")
         self.status_text.config(state=tk.DISABLED)
+
+    def _on_mousewheel(self, event):
+        """处理鼠标滚轮事件"""
+        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
     def choose_segment_color(self):
         """打开颜色选择对话框"""
@@ -986,18 +854,19 @@ class GeometryGUI:
         """更新所有下拉框"""
         points = list(self.analyzer.points.keys())
         segments = list(self.analyzer.segments.keys())
-        
+
+        # 更新添加线段的下拉框
         self.start_combo['values'] = points
         self.end_combo['values'] = points
-        
         if points:
             if not self.start_combo.get():
                 self.start_combo.current(0)
             if not self.end_combo.get():
                 self.end_combo.current(0)
-        
+
         # 更新删除下拉框
         self._update_delete_combo()
+
         # 更新向量输入下拉框
         self.vec1_start_combo['values'] = points
         self.vec1_end_combo['values'] = points
@@ -1008,7 +877,7 @@ class GeometryGUI:
             self.vec1_end_combo.current(min(1, len(points)-1))
             self.vec2_start_combo.current(0)
             self.vec2_end_combo.current(min(1, len(points)-1))
-        
+
         # 更新向量删除下拉框
         vector_options = []
         for vec_info in self.analyzer.vectors_to_display:
@@ -1016,52 +885,53 @@ class GeometryGUI:
             end = vec_info['end']
             label = vec_info.get('label', '向量')
             vector_options.append(f"{label} ({start}→{end})")
-        
-        self.vector_delete_combo['values'] = vector_options
-        if vector_options:
-            self.vector_delete_combo.current(0)
-        
+        if hasattr(self, 'vector_delete_combo'):
+            self.vector_delete_combo['values'] = vector_options
+            if vector_options:
+                self.vector_delete_combo.current(0)
+
         # 更新计算结果删除下拉框
         calculation_options = []
         for name in self.analyzer.points:
             if name.startswith('result_'):
                 x, y, z = self.analyzer.points[name]
                 calculation_options.append(f"{name}({x:.2f}, {y:.2f}, {z:.2f})")
-        
-        self.calculation_delete_combo['values'] = calculation_options
-        if calculation_options:
-            self.calculation_delete_combo.current(0)
+        if hasattr(self, 'calculation_delete_combo'):
+            self.calculation_delete_combo['values'] = calculation_options
+            if calculation_options:
+                self.calculation_delete_combo.current(0)
 
         # 更新几何作图下拉框
-        points = list(self.analyzer.points.keys())
-        segments = list(self.analyzer.segments.keys())
-        
-        # 垂直线
-        self.perp_point_combo['values'] = points
-        self.perp_segment_combo['values'] = segments
-        
-        # 平行线
-        self.parallel_point_combo['values'] = points
-        self.parallel_segment_combo['values'] = segments
-        
-        # 中点
-        self.mid_segment_combo['values'] = segments
-        
-        # 圆/球
-        self.circle_center_combo['values'] = points
-        self.circle_radius_combo['values'] = segments
+        if hasattr(self, 'perp_point_combo'):
+            self.perp_point_combo['values'] = points
+        if hasattr(self, 'perp_segment_combo'):
+            self.perp_segment_combo['values'] = segments
+        if hasattr(self, 'parallel_point_combo'):
+            self.parallel_point_combo['values'] = points
+        if hasattr(self, 'parallel_segment_combo'):
+            self.parallel_segment_combo['values'] = segments
+        if hasattr(self, 'mid_segment_combo'):
+            self.mid_segment_combo['values'] = segments
+        if hasattr(self, 'circle_center_combo'):
+            self.circle_center_combo['values'] = points
+        if hasattr(self, 'circle_radius_combo'):
+            self.circle_radius_combo['values'] = segments
 
     def _update_delete_combo(self):
         """更新删除下拉框内容"""
         delete_type = self.delete_type.get()
-        
         if delete_type == "点":
-            values = list(self.analyzer.points.keys())
-        else:  # 线段
+            values = [name for name in self.analyzer.points.keys()]
+        elif delete_type == "线段":
             values = list(self.analyzer.segments.keys())
-        
+        elif delete_type == "向量":
+            values = [f"{vec['label']} ({vec['start']}→{vec['end']})" for vec in self.analyzer.vectors_to_display]
+        elif delete_type == "计算结果":
+            values = [name for name in self.analyzer.points.keys() if name.startswith('result_')]
+        else:
+            values = []
+
         self.delete_combo['values'] = values
-        
         if values:
             self.delete_combo.current(0)
         else:
@@ -1270,100 +1140,104 @@ class GeometryGUI:
         self.result_text.config(state=tk.DISABLED)
 
     def delete_object_action(self):
-        """删除点或线段（合并操作）"""
-        delete_type = self.delete_type.get()
+        """统一删除点、线段、向量和计算结果"""
+        obj_type = self.delete_type.get()
         obj_name = self.delete_object.get()
-        
+
         if not obj_name:
             messagebox.showerror("错误", "请选择要删除的对象")
             return
-        
-        if delete_type == "点":
-            self.delete_point(obj_name)
-        else:
-            self.delete_segment(obj_name)
 
-    def delete_point(self, point_name):
-        """删除点（修正后）"""
-        # 检查是否存在依赖该点的线段
+        success = False
+        message = ""
+
+        if obj_type == "点":
+            success, message = self.delete_point(obj_name)
+        elif obj_type == "线段":
+            success, message = self.delete_segment(obj_name)
+        elif obj_type == "向量":
+            index = self.vector_delete_combo.current()
+            if index == -1:
+                messagebox.showinfo("提示", "请先选择一个向量")
+                return
+            success, message = self.delete_vector_by_index(index)
+        elif obj_type == "计算结果":
+            success, message = self.delete_calculation_point(obj_name)
+
+        if success:
+            messagebox.showinfo("成功", message)
+        else:
+            messagebox.showerror("错误", message)
+
+        # 更新界面
+        self._update_combo_boxes()
+        self._update_status()
+        self._redraw_plot()
+
+    def delete_point(self, point_name, show_message=True):
+        """删除点（支持内部调用）"""
+        if point_name not in self.analyzer.points:
+            return False, f"点 '{point_name}' 不存在"
+
+        # 检查依赖该点的线段
         dependent_segments = [
-            seg_name for seg_name, (start, end, color, linestyle) in self.analyzer.segments.items()
+            seg_name for seg_name, (start, end, _, _) in self.analyzer.segments.items()
             if start == point_name or end == point_name
         ]
-        
+
         if dependent_segments:
-            confirm = messagebox.askyesno("确认删除", 
-                                       f"点 '{point_name}' 被 {len(dependent_segments)} 条线段引用\n"
-                                       f"这些线段是: {', '.join(dependent_segments)}\n"
-                                       "删除点将同时删除这些线段，是否继续？")
-            if not confirm:
-                return
-            
-            # 删除依赖的线段
+            if show_message:
+                confirm = messagebox.askyesno(
+                    "确认删除",
+                    f"点 '{point_name}' 被 {len(dependent_segments)} 条线段引用\n"
+                    f"这些线段是: {', '.join(dependent_segments)}\n"
+                    "删除点将同时删除这些线段，是否继续？"
+                )
+                if not confirm:
+                    return False, "用户取消删除"
+            # 删除依赖线段
             for seg_name in dependent_segments:
-                del self.analyzer.segments[seg_name]
-        
+                if seg_name in self.analyzer.segments:
+                    del self.analyzer.segments[seg_name]
+
         # 删除点
-        if point_name in self.analyzer.points:
-            del self.analyzer.points[point_name]
-        else:
-            messagebox.showerror("错误", f"点 '{point_name}' 不存在")
-            return
-        
-        # 更新界面
-        self._update_combo_boxes()
-        self._update_status()
-        self._redraw_plot()
-        
-        messagebox.showinfo("成功", f"点 '{point_name}' 已删除")
+        del self.analyzer.points[point_name]
+        return True, f"点 '{point_name}' 及其依赖线段已删除"
 
-    def delete_segment(self, seg_name):
-        """删除线段（修正后）"""
-        # 确认删除
-        confirm = messagebox.askyesno("确认删除", f"确定删除线段 '{seg_name}' 吗？")
-        if not confirm:
-            return
-        
-        # 删除线段
-        if seg_name in self.analyzer.segments:
-            del self.analyzer.segments[seg_name]
-        else:
-            messagebox.showerror("错误", "线段不存在")
-            return
-            
-        # 更新界面
-        self._update_combo_boxes()
-        self._update_status()
-        self._redraw_plot()
-        
-        messagebox.showinfo("成功", f"线段 '{seg_name}' 已删除")
+    def delete_segment(self, seg_name, show_message=True):
+        """删除线段（支持内部调用）"""
+        if seg_name not in self.analyzer.segments:
+            return False, f"线段 '{seg_name}' 不存在"
 
-    def delete_selected_vector(self):
-        """删除用户选择的向量"""
-        index = self.vector_delete_combo.current()
-        if index == -1:
-            messagebox.showinfo("提示", "请先选择一个向量")
-            return
-            
-        if self.analyzer.delete_vector(index):
-            self._update_combo_boxes()
-            self._update_status()
-            self._redraw_plot()
-            messagebox.showinfo("成功", "向量已删除")
-        else:
-            messagebox.showerror("错误", "删除向量失败")
+        del self.analyzer.segments[seg_name]
+        return True, f"线段 '{seg_name}' 已删除"
 
-    def clear_all_vectors(self):
-        """清除所有向量"""
-        if not self.analyzer.vectors_to_display:
-            messagebox.showinfo("提示", "当前没有向量可清除")
-            return
-            
-        self.analyzer.clear_all_vectors()
-        self._update_combo_boxes()
-        self._update_status()
-        self._redraw_plot()
-        messagebox.showinfo("成功", "所有向量已清除")
+    def delete_vector_by_index(self, index):
+        """按索引删除向量"""
+        if 0 <= index < len(self.analyzer.vectors_to_display):
+            del self.analyzer.vectors_to_display[index]
+            return True, f"向量 {index} 已删除"
+        return False, "无效的向量索引"
+
+    def delete_calculation_point(self, point_name):
+        """删除计算结果点及其相关向量"""
+        if point_name not in self.analyzer.points:
+            return False, f"点 '{point_name}' 不存在"
+
+        # 查找并删除与该点相关的向量
+        vectors_to_remove = []
+        for i, vec_info in enumerate(self.analyzer.vectors_to_display):
+            if vec_info['start'] == point_name or vec_info['end'] == point_name:
+                vectors_to_remove.append(i)
+
+        # 逆序删除，避免索引错乱
+        for i in sorted(vectors_to_remove, reverse=True):
+            if i < len(self.analyzer.vectors_to_display):
+                del self.analyzer.vectors_to_display[i]
+
+        # 删除点
+        del self.analyzer.points[point_name]
+        return True, f"计算结果点 '{point_name}' 及其相关向量已删除"
 
     def delete_selected_calculation(self):
         """删除用户选择的计算结果"""
@@ -1427,106 +1301,45 @@ class GeometryGUI:
     def toggle_interaction_mode(self):
         """切换交互模式"""
         self.interaction_mode = not self.interaction_mode
-        
-        if self.interaction_mode:
-            self.btn_interaction.config(text="交互模式: 开启")
-            self.status_text.config(state=tk.NORMAL)
-            self.status_text.insert(tk.END, "交互模式已开启: 点击图形上的点来创建线段\n")
-            self.status_text.config(state=tk.DISABLED)
-        else:
-            self.btn_interaction.config(text="交互模式: 关闭")
-            self.selected_points = []  # 清空已选择的点
-            self.status_text.config(state=tk.NORMAL)
-            self.status_text.insert(tk.END, "交互模式已关闭\n")
-            self.status_text.config(state=tk.DISABLED)
-        
-        # 重绘图形以更新点选择状态
         self._redraw_plot()
 
     def on_plot_click(self, event):
         """处理图形点击事件"""
         if not self.interaction_mode:
             return
-            
-        if event.inaxes != self.ax:
-            return  # 点击在图形外部
-            
-        # 获取点击坐标
+        if event.x is None or event.y is None:
+            return
+
         x, y = event.xdata, event.ydata
-        if self.current_view == '3d':
-            # 在3D视图中，我们需要找到距离点击位置最近的点
-            closest_point = None
-            min_dist = float('inf')
-            
-            # 获取当前的投影对象
-            proj = self.ax.get_proj()
-            
-            # 将3D点转换为屏幕坐标，并找到距离点击位置最近的点
-            for name, (px, py, pz) in self.analyzer.points.items():
-                # 将3D点转换为屏幕坐标
-                x_proj, y_proj, _ = proj3d.proj_transform(px, py, pz, proj)
-                
-                # 计算屏幕距离
-                dist = np.sqrt((x_proj - x)**2 + (y_proj - y)**2)
-                
-                # 使用非常大的阈值以适应3D视图中的距离值
-                if dist < 1000:  # 使用非常大的阈值
-                    if dist < min_dist:
-                        min_dist = dist
-                        closest_point = name
-                        
-            # 使用非常大的阈值
-            if closest_point:
-                self.handle_point_selection(closest_point)
-        else:
-            # 在2D视图中，直接计算距离
-            closest_point = None
-            min_dist = float('inf')
-            
-            for name, (px, py, pz) in self.analyzer.points.items():
-                dist = np.sqrt((px - x)**2 + (py - y)**2)
-                if dist < min_dist:
-                    min_dist = dist
-                    closest_point = name
-            
-            if closest_point and min_dist < 0.5:  # 2D视图使用较小的阈值
-                self.handle_point_selection(closest_point)
+        closest_point = None
+        min_dist = float('inf')
+
+        for name, (px, py, pz) in self.analyzer.points.items():
+            dist = (px - x)**2 + (py - y)**2
+            if dist < min_dist and dist < 1000:
+                min_dist = dist
+                closest_point = name
+
+        if closest_point:
+            self.handle_point_selection(closest_point)
 
     def handle_point_selection(self, point_name):
-        """处理点选择逻辑"""
-        # 如果点已被选择，则取消选择
         if point_name in self.selected_points:
             self.selected_points.remove(point_name)
-            self.status_text.config(state=tk.NORMAL)
-            self.status_text.insert(tk.END, f"已取消选择点 '{point_name}'\n")
-            self.status_text.config(state=tk.DISABLED)
         else:
-            # 添加到选择列表
             self.selected_points.append(point_name)
-            self.status_text.config(state=tk.NORMAL)
-            self.status_text.insert(tk.END, f"已选择点 '{point_name}'\n")
-            self.status_text.config(state=tk.DISABLED)
-            
-            # 如果已选择两个点，则创建线段
-            if len(self.selected_points) == 2:
-                self.create_segment_from_selection()
-        
-        # 重绘图形以更新点选择状态
+
         self._redraw_plot()
 
+        if len(self.selected_points) >= 2:
+            self.create_segment_from_selection()
+
     def create_segment_from_selection(self):
-        """根据选择的点创建线段"""
-        if len(self.selected_points) != 2:
-            return
-            
-        start, end = self.selected_points
-        
-        # 使用当前选择的颜色和线型
+        start = self.selected_points[0]
+        end = self.selected_points[1]
         color = self.segment_color
         linestyle = self.linestyle_var.get()
-        
-        # 添加线段
-        success, msg = self.analyzer.add_segment(start, end, color, linestyle)
+        success, msg = self.analyzer.add_segment(start, end, color=color, linestyle=linestyle)
         if success:
             self.status_text.config(state=tk.NORMAL)
             self.status_text.insert(tk.END, f"成功创建线段: {msg}\n")
@@ -1535,9 +1348,8 @@ class GeometryGUI:
             self.status_text.config(state=tk.NORMAL)
             self.status_text.insert(tk.END, f"创建线段失败: {msg}\n")
             self.status_text.config(state=tk.DISABLED)
-        
-        # 清空选择并更新界面
-        self.selected_points = []
+
+        self.selected_points.clear()
         self._update_combo_boxes()
         self._update_status()
         self._redraw_plot()
@@ -1767,7 +1579,7 @@ class GeometryGUI:
         self._redraw_plot()
 
         # 4. 提示用户
-        messagebox.showinfo("重置成功", "所有数据和控件已恢复到初始状态")
+        messagebox.showinfo("重置成功")
 
     def toggle_3d_view(self):
         """切换3D/2D视图（修正后）"""
@@ -1927,6 +1739,8 @@ class GeometryGUI:
         self.ax.set_ylabel('Y', color='black')
         self.ax.set_zlabel('Z', color='black')
         self.ax.tick_params(colors='black')
+        self.ax.set_aspect('equal')   #等比缩放
+        self.ax.view_init(elev=45, azim=45) #正交视图
 
         # 绘制所有点
         for name, (x, y, z) in self.analyzer.points.items():
@@ -2304,10 +2118,17 @@ class GeometryGUI:
         self.root.destroy()
 
 if __name__ == "__main__":
-    # 配置matplotlib
+    # 日志
+    logging.basicConfig(
+        level=logging.INFO,  # 可选: DEBUG/INFO/WARNING/ERROR/CRITICAL
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+    # 配置 matplotlib
     rcParams['font.sans-serif'] = ['Microsoft YaHei', 'Arial Unicode MS', 'sans-serif']
     rcParams['axes.unicode_minus'] = False
-    
+
     root = tk.Tk()
     app = GeometryGUI(root)
     root.mainloop()
